@@ -1,7 +1,7 @@
 // Guarda la app en el teléfono para que abra sin internet.
 // Responde desde caché y actualiza en segundo plano: un cambio publicado se ve la siguiente vez que abras la app.
 // Sube el número de C en cada cambio publicado. Tus registros viven en localStorage y no se tocan aquí.
-const C = 'plato-v2';
+const C = 'plato-v3';
 const FILES = ['./', 'index.html', 'app.js', 'motor.js', 'foods.json', 'mis_alimentos.json', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 // cache: 'reload' evita que el caché HTTP de GitHub Pages entregue la versión vieja al instalar.

@@ -104,6 +104,20 @@ test('ambigüedad y cosas que no están', () => {
   assert.deepEqual(Motor.resolver('pan dulce', ix).pendientes, ['pan dulce']);
 });
 
+test('miel: 10 gramos son 10 g, no 10 cucharadas', () => {
+  const miel = 64 * 10 / 21; // 64 kcal por cucharada de 21 g
+  for (const t of ['10 gramos de miel de abeja', 'puse 10 gramos de miel de abeja', 'le eché 10 gr. de miel',
+    '10 g. de miel', '10g de miel', 'diez gramos de miel', '10 grs de miel', '10 gm de miel', 'agregué 10 grms de miel'])
+    cerca(suma(uno(t), 'kcal'), miel, t);
+  cerca(suma(uno('una cucharada de miel'), 'kcal'), 64, '1 cucharada');
+  cerca(suma(uno('2 cucharaditas de miel'), 'kcal'), 64 * 14 / 21, '2 cucharaditas = 14 g');
+});
+
+test('respuesta de la IA en gramos se respeta aunque escriba la unidad distinto', () => {
+  for (const u of ['g', 'gramos', 'grams', 'gr.', 'gm', 'G'])
+    cerca(Motor.desdeIA([{ food_id: 'miel', n: 10, unidad: u, nombre: '', cantidad: '', kcal: 0, proteina: 0, carbohidratos: 0, grasa: 0 }], ix)[0].kcal, 64 * 10 / 21, u);
+});
+
 test('sin redondeo antes de sumar', () => {
   const r = uno('media porción de proteína y 33 g de arroz');
   cerca(suma(r, 'carb'), 1.5 + 28.2 * 0.33, 'carbs exactos');

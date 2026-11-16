@@ -3,8 +3,9 @@
 // Orden: (1) tus alimentos (mis_alimentos.json + lo que guardas en el teléfono), (2) base genérica (foods.json), (3) lo que no encuentra se manda a la IA.
 (function (root) {
   const NUM = { un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12, quince: 15, veinte: 20, treinta: 30, cuarenta: 40, cincuenta: 50, cien: 100, ciento: 100, doscientos: 200, trescientos: 300, cuatrocientos: 400, quinientos: 500, medio: 0.5, media: 0.5 };
-  const UNIT = { g: 'g', gr: 'g', grs: 'g', gramo: 'g', kg: 'kg', kilo: 'kg', kilogramo: 'kg', ml: 'ml', mililitro: 'ml', l: 'l', lt: 'l', litro: 'l', porcion: 'porcion', orden: 'porcion', racion: 'porcion', scoop: 'scoop', medida: 'scoop', pieza: 'pieza', pza: 'pieza', pz: 'pieza', taza: 'taza', cucharada: 'cda', cda: 'cda', cucharadita: 'cdita', cdita: 'cdita', rebanada: 'rebanada', lata: 'lata', vaso: 'vaso' };
-  const STOP = new Set('de del la el los las lo al a en mi mis me se su le para por que hoy ayer comi desayune cene almorce merende tome unos unas como aprox aproximadamente'.split(' '));
+  const UNIT = { g: 'g', gr: 'g', grs: 'g', gm: 'g', grm: 'g', grms: 'g', gram: 'g', gramo: 'g', kg: 'kg', kilo: 'kg', kilogramo: 'kg', ml: 'ml', mililitro: 'ml', l: 'l', lt: 'l', litro: 'l', porcion: 'porcion', orden: 'porcion', racion: 'porcion', scoop: 'scoop', medida: 'scoop', pieza: 'pieza', pza: 'pieza', pz: 'pieza', taza: 'taza', cucharada: 'cda', cda: 'cda', cucharadita: 'cdita', cdita: 'cdita', rebanada: 'rebanada', lata: 'lata', vaso: 'vaso' };
+  const STOP = new Set(('de del la el los las lo al a en mi mis me se su le les para por que hoy ayer unos unas como aprox aproximadamente ' +
+    'comi desayune cene almorce merende tome bebi puse eche agregue anadi servi use prepare cocine').split(' '));
   // Palabras que no cambian qué alimento es: "pechuga asada" sigue siendo pechuga. Cualquier otra palabra extra manda el alimento a la IA.
   const DESC = new Set(['cocid', 'hervid', 'asad', 'planch', 'horn', 'natural', 'median', 'sin', 'piel', 'fresc', 'picad', 'rebanad', 'deshebrad', 'vapor', 'enter']); // ya en forma canon()
 
@@ -17,7 +18,7 @@
     if (w.length > 3 && /[aeo]$/.test(w)) w = w.slice(0, -1);
     return w;
   }
-  const unitOf = t => UNIT[t] || (t.length > 3 && UNIT[t.replace(/e?s$/, '')]) || null;
+  const unitOf = t => { t = t.replace(/\.+$/, ''); return UNIT[t] || (t.length > 3 && UNIT[t.replace(/e?s$/, '')]) || null; };
   function toNum(t) {
     if (/^\d+(?:[.,]\d+)?$/.test(t)) return parseFloat(t.replace(',', '.'));
     const f = t.match(/^(\d+)\/(\d+)$/); if (f && +f[2]) return f[1] / f[2];
@@ -26,7 +27,7 @@
   const palabras = s => [...new Set(norm(s).split(' ').filter(w => w && !STOP.has(w) && !/^\d/.test(w)).map(canon))];
 
   function segmentos(text) {
-    let t = norm(text);
+    let t = norm(text).replace(/\b(g|gr|grs|gm|grm|grms|kg|ml|lt|l|cda|cdita|pza|pz)\.(?!\d)/g, '$1'); // "10 gr." no parte la frase
     // "una porción y media" → "1.5 porcion"; "una y media porciones" → "1.5 porciones"
     t = t.replace(/\b(\S+) (\S+) y medi[oa]\b/g, (m, a, b) => toNum(a) != null && unitOf(b) ? `${toNum(a) + 0.5} ${b}` : m);
     t = t.replace(/\b(\S+) y medi[oa]\b/g, (m, a) => toNum(a) != null ? `${toNum(a) + 0.5}` : m);
@@ -37,7 +38,7 @@
     let qty = null, unit = null, unitTok = null;
     const words = [];
     for (const t of seg.split(' ')) {
-      const m = t.match(/^(\d+(?:[.,]\d+)?)(g|gr|grs|kg|ml|l)$/);
+      const m = t.match(/^(\d+(?:[.,]\d+)?)(g|gr|grs|gm|grm|grms|kg|ml|l)$/);
       if (m) { qty = parseFloat(m[1].replace(',', '.')); unit = UNIT[m[2]]; continue; }
       if (t === 'cuarto' || t === 'cuartos') { qty = (qty ?? 1) / 4; continue; }
       const n = toNum(t);
@@ -137,6 +138,7 @@
     });
   }
 
-  const Motor = { norm, canon, palabras, segmentos, parse, indice, buscar, racion, resolver, desdeIA };
+  const UNIDADES = ['g', 'ml', 'porcion', 'pieza', 'taza', 'scoop', 'cda', 'cdita', 'rebanada', 'lata', 'vaso']; // las únicas que la IA puede contestar
+  const Motor = { UNIDADES, norm, canon, palabras, segmentos, parse, indice, buscar, racion, resolver, desdeIA };
   if (typeof module === 'object' && module.exports) module.exports = Motor; else root.Motor = Motor;
 })(this);

@@ -1,13 +1,13 @@
 'use strict';
 // Mi Plato: registro de comidas con IA, resumen del día y peso. Todo se guarda en este teléfono (localStorage).
-const K = 'plato-v1', VERSION = '1.1.0', MODEL = 'claude-haiku-5-5';
+const K = 'plato-v1', VERSION = '1.1.1', MODEL = 'claude-haiku-5-5';
 const GOAL = { kcal: 1900, prot: 160 }; // día base del plan (sección 5)
 
 // La IA solo ve lo que la base local no reconoció (motor.js decide eso).
 const SYSTEM = `Eres un registro de comidas para un hombre mexicano en Monterrey. Recibes, uno por línea, alimentos que la app no encontró en su base. Pueden venir de dictado por voz, con errores. Devuelve cada alimento por separado.
 
 Reglas:
-- Si el alimento es uno del catálogo (aunque esté mal escrito o dicho distinto), pon su id en food_id, la cantidad en "n" y la unidad en "unidad" ("g", "ml", "porcion", "pieza", "taza", "scoop", "cda", "cdita", "rebanada", "lata" o "vaso"). Si no dice cantidad, n = 1 y unidad = "porcion".
+- Si el alimento es uno del catálogo (aunque esté mal escrito o dicho distinto), pon su id en food_id, la cantidad en "n" y la unidad en "unidad" ("g", "ml", "porcion", "pieza", "taza", "scoop", "cda", "cdita", "rebanada", "lata" o "vaso"). Gramos van como n = gramos y unidad = "g" (ej. "10 gramos de miel" → n = 10, unidad = "g"); mililitros igual con "ml". Si no dice cantidad, n = 1 y unidad = "porcion".
 - Si no está en el catálogo, food_id = "" y estima kcal, proteína, carbohidratos y grasa en gramos para lo que dijo. Si no dice cantidad, asume una porción típica de México y escríbelo en "cantidad", por ejemplo "1 pieza mediana (supuesto)".
 - Llena siempre kcal, proteina, carbohidratos y grasa (si hay food_id, la app usa los de su base).
 - "cantidad" en texto corto y claro. "nombre" corto, en español.
@@ -27,7 +27,7 @@ const schema = ids => ({
         required: ['nombre', 'cantidad', 'food_id', 'n', 'unidad', 'kcal', 'proteina', 'carbohidratos', 'grasa'],
         properties: {
           nombre: { type: 'string' }, cantidad: { type: 'string' },
-          food_id: { type: 'string', enum: ['', ...ids] }, n: { type: 'number' }, unidad: { type: 'string' },
+          food_id: { type: 'string', enum: ['', ...ids] }, n: { type: 'number' }, unidad: { type: 'string', enum: Motor.UNIDADES },
           kcal: { type: 'number' }, proteina: { type: 'number' }, carbohidratos: { type: 'number' }, grasa: { type: 'number' },
         },
       },
