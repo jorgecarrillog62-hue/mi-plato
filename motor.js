@@ -76,6 +76,7 @@
         const inText = k.every(w => W.has(w)), inKey = words.every(w => k.includes(w));
         let lvl = inText && inKey ? 3 : inText ? 2 : inKey ? 1 : 0;
         if (lvl === 2 && !words.every(w => k.includes(w) || DESC.has(w))) lvl = 0;
+        if (lvl === 1 && f.combo) lvl = 0; // "papa" no debe ofrecer "Comida del plan (pollo con papa)"
         if (lvl && (!best || lvl > best.lvl || (lvl === best.lvl && k.length > best.len))) best = { lvl, len: k.length };
       }
       if (best) cands.push({ f, ...best });

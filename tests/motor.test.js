@@ -31,7 +31,7 @@ test('papa: pregunta si no dice cuál, y respeta gramos', () => {
   const it = r.items[0];
   assert.ok(it.ask, 'debe preguntar');
   const ids = it.opciones.map(o => o.id);
-  for (const id of ['papa-cambray', 'papa-cocida', 'papas-fritas', 'pure-papa']) assert.ok(ids.includes(id), id);
+  assert.deepEqual(ids.slice().sort(), ['papa-cambray', 'papa-cocida', 'papas-fritas', 'pure-papa'], 'solo papas, sin comidas del plan');
   assert.equal(ids[0], 'papa-cambray', 'tus alimentos van primero');
   const elegido = Motor.racion(ix.byId.get('papa-cambray'), it.qty, it.unit, ix)[0];
   cerca(elegido.kcal, 87 * 1.83, 'kcal de 183 g de cambray');

@@ -1,47 +1,22 @@
 'use strict';
 // Mi Plato: registro de comidas con IA, resumen del día y peso. Todo se guarda en este teléfono (localStorage).
-const K = 'plato-v1', VERSION = '1.0.0', MODEL = 'claude-haiku-5-5';
+const K = 'plato-v1', VERSION = '1.1.0', MODEL = 'claude-haiku-5-5';
 const GOAL = { kcal: 1900, prot: 160 }; // día base del plan (sección 5)
 
-// Alimentos del plan con sus números tal cual vienen en el plan: [descripción de la porción, kcal, proteína g]
-const PLAN = {
-  desayuno_base: ['Desayuno base: 250 g yogur griego natural sin azúcar + 30 g granola baja en azúcar + 1 plátano mediano (o 1 taza de fresas)', 410, 22],
-  comida_pollo: ['Comida base: 200 g pollo cocido (pechuga y muslo sin piel) + 300 g papa cocida + 200 g verduras + 1 cdita aceite', 700, 66],
-  comida_atun: ['Comida con atún: 1 lata atún en agua + 2 huevos duros + 300 g papa + 200 g verduras + 1 cdita aceite', 600, 47],
-  comida_sin_papa: ['Comida de día flex: 200 g pollo + 200 g verduras + 1 cdita aceite, sin papa ni tortillas', 470, 60],
-  snack_leche_whey: ['Snack: 300 ml leche light + 1 scoop (30 g) proteína whey', 230, 33],
-  cena_base: ['Cena base: 3 tortillas de maíz + 2 huevos + 4 claras revueltos + ½ taza frijoles de olla + 40 g aguacate + salsa', 570, 39],
-  cena_ligera: ['Cena ligera: 2 huevos + 4 claras + verduras', 250, 28],
-  huevo: ['Huevo entero, 2 piezas', 145, 13],
-  claras: ['Claras de huevo, 4 claras (~130 g)', 70, 14],
-  frijoles: ['Frijoles de olla, ½ taza (~90 g)', 100, 6.5],
-  tortillas: ['Tortilla de maíz, 3 piezas (~90 g)', 195, 5],
-  avena: ['Avena, 40 g en crudo', 150, 5],
-  cottage: ['Queso cottage, 200 g', 180, 22],
-  panela: ['Queso panela, 60 g', 150, 11],
-  arroz: ['Arroz blanco cocido, 150 g', 195, 4],
-  leche_light: ['Leche light (deslactosada light), 250 ml', 91, 7.8],
-  yogur_oikos: ['Yogur griego Oikos natural sin azúcar, 100 g', 69, 7],
-  atun_dolores_premium: ['Atún Dolores Premium en agua, 100 g', 116, 26.7],
-  atun_tuny: ['Atún Tuny en agua, 100 g', 93, 21],
-};
-
-const SYSTEM = `Eres un registro de comidas para un hombre mexicano en Monterrey. Recibes lo que comió en español informal (puede venir de dictado por voz, con errores). Devuelve cada alimento por separado.
+// La IA solo ve lo que la base local no reconoció (motor.js decide eso).
+const SYSTEM = `Eres un registro de comidas para un hombre mexicano en Monterrey. Recibes, uno por línea, alimentos que la app no encontró en su base. Pueden venir de dictado por voz, con errores. Devuelve cada alimento por separado.
 
 Reglas:
-- Si un alimento o comida coincide con uno de la lista del plan (mismo alimento y preparación), pon su plan_id y en "porciones" cuántas veces la porción del plan comió (ej. "3 huevos" con huevo = 2 piezas → 1.5). Si dice que comió una comida completa del plan ("mi desayuno de siempre", "la comida de pollo con papa"), usa la comida completa.
-- Si no coincide, plan_id = "" y estima kcal y proteína con porciones típicas de México.
-- Siempre estima carbohidratos y grasa en gramos.
-- Si no dice cantidad, asume una porción típica y escríbelo en "cantidad", por ejemplo "1 pieza mediana (supuesto)".
+- Si el alimento es uno del catálogo (aunque esté mal escrito o dicho distinto), pon su id en food_id, la cantidad en "n" y la unidad en "unidad" ("g", "ml", "porcion", "pieza", "taza", "scoop", "cda", "cdita", "rebanada", "lata" o "vaso"). Si no dice cantidad, n = 1 y unidad = "porcion".
+- Si no está en el catálogo, food_id = "" y estima kcal, proteína, carbohidratos y grasa en gramos para lo que dijo. Si no dice cantidad, asume una porción típica de México y escríbelo en "cantidad", por ejemplo "1 pieza mediana (supuesto)".
+- Llena siempre kcal, proteina, carbohidratos y grasa (si hay food_id, la app usa los de su base).
 - "cantidad" en texto corto y claro. "nombre" corto, en español.
 - En "nota" pon una frase breve solo si algo es ambiguo; si no, cadena vacía.
+- Referencia: salida a restaurante ≈ 900–1,100 kcal.
 
-Alimentos del plan (plan_id: porción → kcal, proteína):
-${Object.entries(PLAN).map(([id, p]) => `${id}: ${p[0]} → ${p[1]} kcal, ${p[2]} g`).join('\n')}
-
-Referencias del plan (no tienen plan_id, úsalas para estimar): verduras congeladas 200 g ≈ 70–100 kcal y 3–4 g de proteína; fruta 1 pieza ≈ 60–105 kcal y 1 g; salida a restaurante ≈ 900–1,100 kcal.`;
-
-const SCHEMA = {
+Catálogo (id: nombre, porción):
+`;
+const schema = ids => ({
   type: 'object', additionalProperties: false, required: ['items', 'nota'],
   properties: {
     nota: { type: 'string' },
@@ -49,17 +24,25 @@ const SCHEMA = {
       type: 'array',
       items: {
         type: 'object', additionalProperties: false,
-        required: ['nombre', 'cantidad', 'plan_id', 'porciones', 'kcal', 'proteina', 'carbohidratos', 'grasa'],
+        required: ['nombre', 'cantidad', 'food_id', 'n', 'unidad', 'kcal', 'proteina', 'carbohidratos', 'grasa'],
         properties: {
           nombre: { type: 'string' }, cantidad: { type: 'string' },
-          plan_id: { type: 'string', enum: ['', ...Object.keys(PLAN)] },
-          porciones: { type: 'number' }, kcal: { type: 'number' }, proteina: { type: 'number' },
-          carbohidratos: { type: 'number' }, grasa: { type: 'number' },
+          food_id: { type: 'string', enum: ['', ...ids] }, n: { type: 'number' }, unidad: { type: 'string' },
+          kcal: { type: 'number' }, proteina: { type: 'number' }, carbohidratos: { type: 'number' }, grasa: { type: 'number' },
         },
       },
     },
   },
-};
+});
+
+// Base de alimentos: foods.json (genéricos), mis_alimentos.json (tus etiquetas) y S.foods (lo que corriges en el teléfono, manda sobre todo).
+let BASE = null;
+const DBP = Promise.all(['foods.json', 'mis_alimentos.json'].map(f => fetch(f).then(r => { if (!r.ok) throw new Error(f); return r.json(); })))
+  .then(([foods, mios]) => { BASE = { foods, mios }; }).catch(() => { });
+const idx = () => Motor.indice(BASE?.foods, BASE?.mios, S.foods);
+const fuenteTxt = i => i.fuente === 'mia' ? (i.ref === 'etiqueta mía' ? 'mi etiqueta' : 'mis alimentos · ' + i.ref)
+  : i.fuente === 'base' ? 'base ' + i.ref : i.fuente === 'plan' ? 'del plan' : 'estimado';
+const badge = i => `<span class="badge ${i.fuente === 'estimado' ? 'est' : ''}">${esc(fuenteTxt(i))}${i.verificar ? ' · verificar' : ''}</span>`;
 
 // ---------- utilidades ----------
 const $ = s => document.querySelector(s);
@@ -71,24 +54,14 @@ const r1 = n => Math.round((Number(n) || 0) * 10) / 10;
 const fmt = n => Math.round(n).toLocaleString('es-MX');
 const num = s => parseFloat(String(s).replace(',', '.'));
 
-function load() { let d; try { d = JSON.parse(localStorage.getItem(K)); } catch { } return Object.assign({ meals: [], weights: [], apiKey: '' }, d || {}); }
+function load() { let d; try { d = JSON.parse(localStorage.getItem(K)); } catch { } return Object.assign({ meals: [], weights: [], apiKey: '', foods: [] }, d || {}); }
 function save() {
   try { localStorage.setItem(K, JSON.stringify(S)); }
   catch (e) { alert('No se pudo guardar en el teléfono (' + e.message + '). Exporta tus datos desde Ajustes.'); }
 }
 let S = load();
 
-// ---------- lógica pura (probada en runTests) ----------
-function toItems(raw) {
-  return raw.map(it => {
-    const p = PLAN[it.plan_id], n = it.porciones > 0 ? it.porciones : 1;
-    return {
-      nombre: it.nombre, cantidad: it.cantidad, fuente: p ? 'plan' : 'estimado',
-      kcal: Math.round(p ? p[1] * n : it.kcal), prot: r1(p ? p[2] * n : it.proteina),
-      carb: r1(it.carbohidratos), grasa: r1(it.grasa),
-    };
-  });
-}
+// ---------- lógica pura (probada en runTests; la de alimentos en tests/motor.test.js) ----------
 function totals(meals, date) {
   const t = { kcal: 0, prot: 0, carb: 0, grasa: 0 };
   for (const m of meals) if (m.status === 'ok' && m.date === date) for (const i of m.items) for (const k in t) t[k] += i[k] || 0;
@@ -111,8 +84,9 @@ function rolling(weights) { // promedio de los pesajes de los 7 días que termin
 
 // ---------- IA ----------
 function fail(msg, retry) { return Object.assign(new Error(msg), { retry }); }
-async function interpret(text) {
+async function interpret(text, ix) {
   if (!S.apiKey) throw fail('Falta tu API key. Ponla en Ajustes.', false);
+  const catalogo = ix.foods.map(f => `${f.id}: ${f.nombre} (${f.combo ? 'comida completa' : f.porcion_base.texto})`).join('\n');
   let res;
   try {
     res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -122,9 +96,9 @@ async function interpret(text) {
         'anthropic-dangerous-direct-browser-access': 'true', // llamada directa desde el teléfono, sin servidor
       },
       body: JSON.stringify({
-        model: MODEL, max_tokens: 2000, system: SYSTEM,
+        model: MODEL, max_tokens: 2000, system: SYSTEM + catalogo,
         thinking: { type: 'disabled' },
-        output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
+        output_config: { effort: 'low', format: { type: 'json_schema', schema: schema(ix.foods.map(f => f.id)) } },
         messages: [{ role: 'user', content: text }],
       }),
     });
@@ -141,12 +115,19 @@ async function interpret(text) {
 
 const busy = new Set();
 async function processPending() {
+  await DBP;
   for (const m of S.meals.filter(m => m.status === 'pending' && !busy.has(m.id))) {
-    if (!navigator.onLine) { m.error = 'Sin conexión. Se procesa cuando vuelva el internet.'; save(); renderHoy(); return; }
     busy.add(m.id); renderHoy();
     try {
-      const out = await interpret(m.text);
-      m.items = toItems(out.items); m.nota = out.nota || ''; m.status = 'draft'; m.error = '';
+      if (!BASE) throw fail('No se pudo cargar la base de alimentos. Reintenta con internet.', true);
+      const ix = idx(), r = Motor.resolver(m.text, ix);
+      m.nota = '';
+      if (r.pendientes.length) { // solo lo que no está en la base va a la IA
+        const out = await interpret(r.pendientes.join('\n'), ix);
+        r.items.push(...Motor.desdeIA(out.items, ix)); m.nota = out.nota || '';
+      }
+      if (!r.items.length) throw fail('No encontré alimentos en el texto. Corrígelo.', false);
+      m.items = r.items; m.status = 'draft'; m.error = '';
     } catch (e) { m.error = e.message; if (!e.retry) m.status = 'error'; }
     busy.delete(m.id); save(); renderHoy();
   }
@@ -179,16 +160,21 @@ function renderHoy() {
     ${bar(t.kcal, GOAL.kcal, '')}<div class="small muted">${left(t.kcal, GOAL.kcal, 'kcal')}</div>
     <div class="row between" style="margin-top:12px"><span>Proteína</span><span class="big">${fmt(t.prot)} g <span class="small muted">/ ${GOAL.prot} g</span></span></div>
     ${bar(t.prot, GOAL.prot, 'prot')}<div class="small muted">${left(t.prot, GOAL.prot, 'g de proteína')}</div>
-    <div class="small muted" style="margin-top:10px">Carbohidratos ≈ ${fmt(t.carb)} g · Grasa ≈ ${fmt(t.grasa)} g</div>`;
+    <div class="small muted" style="margin-top:10px">Carbohidratos ${fmt(t.carb)} g · Grasa ${fmt(t.grasa)} g</div>`;
 
   $('#drafts').innerHTML = S.meals.filter(m => m.status !== 'ok').map(m => {
     if (m.status === 'draft') return `<div class="card">
       <h2>Confirma</h2><div class="small muted">“${esc(m.text)}”</div>
       <div class="item small muted" style="border:0"><span></span><span style="text-align:right">kcal</span><span style="text-align:right">prot g</span><span></span></div>
-      ${m.items.map((i, n) => `<div class="item">
-        <div><div>${esc(i.nombre)}</div><div class="small muted">${esc(i.cantidad)} <span class="badge ${i.fuente === 'plan' ? '' : 'est'}">${i.fuente === 'plan' ? 'del plan' : 'estimado'}</span></div></div>
-        <input inputmode="decimal" value="${i.kcal}" data-edit="${m.id}" data-i="${n}" data-f="kcal" aria-label="kcal de ${esc(i.nombre)}">
-        <input inputmode="decimal" value="${i.prot}" data-edit="${m.id}" data-i="${n}" data-f="prot" aria-label="proteína de ${esc(i.nombre)}">
+      ${m.items.map((i, n) => i.ask ? `<div class="item"><div style="grid-column:1/4">
+          <div>“${esc(i.nombre)}”: ¿cuál?</div>
+          <div class="row" style="flex-wrap:wrap;margin-top:6px">${i.opciones.map(o => `<button class="small" style="padding:8px 12px" data-act="pick" data-id="${m.id}" data-i="${n}" data-f="${esc(o.id)}">${esc(o.nombre)}</button>`).join('')}</div></div>
+        <button data-act="rmitem" data-id="${m.id}" data-i="${n}" aria-label="Quitar ${esc(i.nombre)}">✕</button></div>`
+      : `<div class="item">
+        <div><div>${esc(i.nombre)}</div><div class="small muted">${esc(i.cantidad)} ${badge(i)}</div>
+          <div class="small muted">Carbs ${r1(i.carb)} g · Grasa ${r1(i.grasa)} g</div></div>
+        <input inputmode="decimal" value="${Math.round(i.kcal)}" data-edit="${m.id}" data-i="${n}" data-f="kcal" aria-label="kcal de ${esc(i.nombre)}">
+        <input inputmode="decimal" value="${r1(i.prot)}" data-edit="${m.id}" data-i="${n}" data-f="prot" aria-label="proteína de ${esc(i.nombre)}">
         <button data-act="rmitem" data-id="${m.id}" data-i="${n}" aria-label="Quitar ${esc(i.nombre)}">✕</button></div>`).join('')}
       ${m.nota ? `<p class="small muted">${esc(m.nota)}</p>` : ''}
       <div class="row" style="margin-top:10px"><button class="primary" style="flex:1" data-act="ok" data-id="${m.id}">✓ Confirmar</button>
@@ -204,8 +190,8 @@ function renderHoy() {
   const done = S.meals.filter(m => m.status === 'ok' && m.date === d);
   $('#list').innerHTML = `<h2>Registrado hoy</h2>` + (done.length ? done.map(m => {
     const tt = totals([m], d);
-    return `<div class="meal row between"><div><div>${esc(m.items.map(i => i.nombre).join(', '))}</div>
-      <div class="small muted">${new Date(m.ts).toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' })} · ${fmt(tt.kcal)} kcal · ${fmt(tt.prot)} g prot${m.items.some(i => i.fuente !== 'plan') ? ' · incluye estimación' : ''}</div></div>
+    return `<div class="meal row between"><div><div>${m.items.map(i => `${esc(i.nombre)} ${badge(i)}`).join(', ')}</div>
+      <div class="small muted">${new Date(m.ts).toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' })} · ${fmt(tt.kcal)} kcal · ${fmt(tt.prot)} g prot · ${fmt(tt.carb)} g carbs · ${fmt(tt.grasa)} g grasa</div></div>
       <button class="link" data-act="del" data-id="${m.id}" aria-label="Borrar">✕</button></div>`;
   }).join('') : '<p class="muted small">Todavía nada.</p>');
 }
@@ -257,24 +243,78 @@ function renderAjustes() {
       <div class="row" style="margin-top:10px"><button class="primary" style="flex:1" data-act="savekey">Guardar</button><button data-act="testkey">Probar</button></div>
       <p class="small muted" id="keymsg">Se guarda solo en este teléfono.</p>
     </div>
+    <div class="card"><h2>Alimentos</h2>
+      <input id="fq" type="search" autocomplete="off" placeholder="Buscar: papa, whey, tortilla…" aria-label="Buscar alimento">
+      <div id="flist"></div>
+      <div id="fform"></div>
+      <div class="row" style="margin-top:10px"><button style="flex:1" data-act="fnew">+ Agregar alimento</button><button data-act="fexport">Exportar</button></div>
+      <p class="small muted" style="margin:8px 0 0">Lo que guardas aquí manda sobre todo lo demás y vive en este teléfono. “Exportar” baja un archivo para pasarlo a mis_alimentos.json.</p>
+    </div>
     <div class="card"><h2>Metas (día base del plan)</h2><p style="margin:0">${fmt(GOAL.kcal)} kcal · ${GOAL.prot} g de proteína</p></div>
     <div class="card"><h2>Tus datos</h2>
       <button class="full" data-act="export">Exportar a archivo (CSV)</button>
       <p class="small muted" id="persist">${S.meals.length} comidas · ${S.weights.length} pesajes</p></div>
     <p class="small muted">Mi Plato v${VERSION}</p>`;
   navigator.storage?.persisted?.().then(p => { $('#persist').textContent += p ? ' · almacenamiento protegido' : ' · almacenamiento no protegido: exporta seguido'; });
+  DBP.then(renderFoods);
 }
 
+function renderFoods() {
+  if (!BASE) return void ($('#flist').innerHTML = '<p class="small err">No se pudo cargar la base de alimentos.</p>');
+  const q = Motor.norm($('#fq').value), ix = idx();
+  const list = ix.foods.filter(f => q ? Motor.norm([f.nombre, ...(f.aliases || [])].join(' ')).includes(q) : f.mia).slice(0, 15);
+  $('#flist').innerHTML = list.map(f => `<div class="meal row between"><div>
+      <div>${esc(f.nombre)} ${f.combo ? '<span class="badge">comida del plan</span>' : badge({ fuente: f.mia ? 'mia' : 'base', ref: f.fuente, verificar: f.verificar })}</div>
+      <div class="small muted">${f.combo ? 'Incluye: ' + esc(f.combo.map(c => ix.byId.get(c.id)?.nombre || c.id).join(', '))
+        : `${esc(f.porcion_base.texto)} · ${f.calorias} kcal · P ${f.proteina_g} · C ${f.carbs_g} · G ${f.grasa_g}`}</div>
+      <div class="small muted">Dices: ${esc((f.aliases || []).join(', ') || '—')}</div></div>
+    ${f.combo ? '' : `<button class="link" data-act="fedit" data-f="${esc(f.id)}">Editar</button>`}</div>`).join('')
+    || `<p class="small muted">${q ? 'No hay coincidencias.' : 'Busca un alimento para verlo o corregirlo.'}</p>`;
+}
+function foodForm(f) {
+  const v = x => esc(x ?? '');
+  const field = (id, label, val, num) => `<label class="small" style="flex:1">${label}<input id="ff-${id}" value="${v(val)}" ${num ? 'inputmode="decimal"' : ''}></label>`;
+  $('#fform').innerHTML = `<div style="display:grid;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">
+    <h2>${f ? 'Corregir alimento' : 'Nuevo alimento'}</h2>
+    ${field('nombre', 'Nombre', f?.nombre)}
+    ${field('alias', 'Cómo lo dices (separa con comas)', (f?.aliases || []).join(', '))}
+    ${field('ptxt', 'Porción (texto)', f?.porcion_base.texto)}
+    <div class="row">${field('g', 'Gramos', f?.porcion_base.g, 1)}${field('ml', 'o ml', f?.porcion_base.ml, 1)}</div>
+    <div class="row">${field('kcal', 'kcal', f?.calorias, 1)}${field('p', 'Proteína g', f?.proteina_g, 1)}</div>
+    <div class="row">${field('c', 'Carbs g', f?.carbs_g, 1)}${field('gr', 'Grasa g', f?.grasa_g, 1)}</div>
+    <div class="row"><button class="primary" style="flex:1" data-act="fsave" data-f="${v(f?.id)}">Guardar</button><button data-act="fcancel">Cancelar</button></div>
+    ${f && S.foods.some(x => x.id === f.id) ? `<button class="link" data-act="fdel" data-f="${v(f.id)}">Quitar mi versión (vuelve al valor original)</button>` : ''}</div>`;
+  $('#ff-nombre').focus();
+}
+function saveFood(id) {
+  const n = k => num($('#ff-' + k).value), nombre = $('#ff-nombre').value.trim(), g = n('g'), ml = n('ml');
+  const [kcal, p, c, gr] = ['kcal', 'p', 'c', 'gr'].map(n);
+  if (!nombre || !(g > 0 || ml > 0) || ![kcal, p, c, gr].every(x => x >= 0))
+    return alert('Llena el nombre, los gramos o ml de la porción y los 4 valores (pueden ser 0).');
+  const old = id && idx().byId.get(id);
+  const f = {
+    id: old ? old.id : 'u-' + Date.now().toString(36), nombre,
+    aliases: $('#ff-alias').value.split(',').map(s => s.trim()).filter(Boolean),
+    porcion_base: Object.assign({ texto: $('#ff-ptxt').value.trim() || (g > 0 ? `${g} g` : `${ml} ml`) }, g > 0 ? { g } : { ml }),
+    calorias: kcal, proteina_g: p, carbs_g: c, grasa_g: gr, fuente: 'etiqueta mía', verificar: false,
+  };
+  if (old?.equivalencias) f.equivalencias = old.equivalencias;
+  S.foods = S.foods.filter(x => x.id !== f.id).concat(f); save();
+  $('#fform').innerHTML = ''; $('#fq').value = nombre; renderFoods();
+}
+
+function download(name, text, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
 function exportCSV() {
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const rows = [['tipo', 'fecha', 'hora', 'texto', 'alimento', 'cantidad', 'fuente', 'kcal', 'proteina_g', 'carbohidratos_g', 'grasa_g', 'peso_kg']];
   for (const m of S.meals.filter(m => m.status === 'ok'))
-    for (const i of m.items) rows.push(['comida', m.date, new Date(m.ts).toTimeString().slice(0, 5), m.text, i.nombre, i.cantidad, i.fuente, i.kcal, i.prot, i.carb, i.grasa, '']);
+    for (const i of m.items) rows.push(['comida', m.date, new Date(m.ts).toTimeString().slice(0, 5), m.text, i.nombre, i.cantidad, fuenteTxt(i), r1(i.kcal), r1(i.prot), r1(i.carb), r1(i.grasa), '']);
   for (const w of S.weights) rows.push(['peso', w.date, '', '', '', '', '', '', '', '', '', w.kg]);
-  const blob = new Blob(['﻿' + rows.map(r => r.map(q).join(',')).join('\n')], { type: 'text/csv' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = `mi-plato-${today()}.csv`; a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  download(`mi-plato-${today()}.csv`, '﻿' + rows.map(r => r.map(q).join(',')).join('\n'), 'text/csv');
 }
 
 // ---------- eventos ----------
@@ -298,7 +338,22 @@ document.addEventListener('click', async e => {
       S.meals.push({ id: Date.now().toString(36), ts: Date.now(), date: today(), text, status: 'pending', items: [] });
       $('#txt').value = ''; $('#txt').blur(); save(); renderHoy(); scrollTo(0, 0); processPending(); break;
     }
-    case 'ok': m.status = 'ok'; save(); renderHoy(); break;
+    case 'ok': {
+      const q = m.items.filter(i => i.ask);
+      if (q.length) return alert('Primero elige cuál fue: ' + q.map(i => '“' + i.nombre + '”').join(', '));
+      m.status = 'ok'; save(); renderHoy(); break;
+    }
+    case 'pick': {
+      const i = +b.dataset.i, it = m.items[i], ix = idx(), f = ix.byId.get(b.dataset.f);
+      if (!f) return alert('Ese alimento ya no existe en la base.');
+      m.items.splice(i, 1, ...Motor.racion(f, it.qty, it.unit, ix)); save(); renderHoy(); break;
+    }
+    case 'fnew': foodForm(null); break;
+    case 'fedit': foodForm(idx().byId.get(b.dataset.f)); break;
+    case 'fcancel': $('#fform').innerHTML = ''; break;
+    case 'fsave': saveFood(b.dataset.f); break;
+    case 'fdel': if (confirm('¿Quitar tu versión de este alimento?')) { S.foods = S.foods.filter(x => x.id !== b.dataset.f); save(); $('#fform').innerHTML = ''; renderFoods(); } break;
+    case 'fexport': download('mis_alimentos_telefono.json', JSON.stringify(S.foods, null, 2), 'application/json'); break;
     case 'rmitem': m.items.splice(+b.dataset.i, 1); if (!m.items.length) S.meals.splice(S.meals.indexOf(m), 1); save(); renderHoy(); break;
     case 'redo': $('#txt').value = m.text; S.meals.splice(S.meals.indexOf(m), 1); save(); renderHoy(); $('#txt').focus(); break;
     case 'retry': m.status = 'pending'; m.error = ''; save(); processPending(); break;
@@ -313,7 +368,11 @@ document.addEventListener('click', async e => {
     case 'savekey': S.apiKey = $('#key').value.trim(); save(); $('#keymsg').textContent = 'Guardada en este teléfono.'; processPending(); break;
     case 'testkey': {
       S.apiKey = $('#key').value.trim(); save(); $('#keymsg').textContent = 'Probando…';
-      try { const o = await interpret('un plátano'); const i = toItems(o.items)[0]; $('#keymsg').textContent = `✓ Funciona: ${i.nombre}, ${i.kcal} kcal.`; }
+      try {
+        await DBP; if (!BASE) throw new Error('No se pudo cargar la base de alimentos.');
+        const ix = idx(), o = await interpret('un tamal', ix), i = Motor.desdeIA(o.items, ix)[0];
+        $('#keymsg').textContent = `✓ Funciona: ${i.nombre}, ${Math.round(i.kcal)} kcal.`;
+      }
       catch (err) { $('#keymsg').textContent = '✗ ' + err.message; }
       break;
     }
@@ -325,6 +384,7 @@ document.addEventListener('change', e => {
   const m = meal(el.dataset.edit), v = num(el.value);
   if (m && v >= 0) { m.items[+el.dataset.i][el.dataset.f] = el.dataset.f === 'kcal' ? Math.round(v) : r1(v); save(); }
 });
+document.addEventListener('input', e => { if (e.target.id === 'fq') renderFoods(); });
 document.addEventListener('keydown', e => { if (e.target.id === 'txt' && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('[data-act="add"]').click(); } });
 addEventListener('online', processPending);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { if (tab === 'hoy') renderHoy(); processPending(); } });
@@ -332,20 +392,15 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { if
 // ---------- autopruebas: abrir con ?test ----------
 function runTests() {
   const ok = (c, msg) => { if (!c) throw new Error('Falla: ' + msg); };
-  const it = toItems([
-    { nombre: 'Huevo', cantidad: '3', plan_id: 'huevo', porciones: 1.5, kcal: 999, proteina: 999, carbohidratos: 1, grasa: 15 },
-    { nombre: 'Muslo', cantidad: '2', plan_id: '', porciones: 1, kcal: 420, proteina: 52.34, carbohidratos: 0, grasa: 22 },
-  ]);
-  ok(it[0].kcal === 218 && it[0].prot === 19.5 && it[0].fuente === 'plan', 'plan × porciones manda sobre la IA');
-  ok(it[1].kcal === 420 && it[1].prot === 52.3 && it[1].fuente === 'estimado', 'estimado conserva valores de la IA');
+  const it = [{ kcal: 217.5, prot: 19.53, carb: 1, grasa: 15 }, { kcal: 420.4, prot: 52.34, carb: 0, grasa: 22 }];
   const t = totals([{ status: 'ok', date: '2026-11-12', items: it }, { status: 'draft', date: '2026-11-12', items: it }], '2026-11-12');
-  ok(t.kcal === 638, 'totales solo cuentan confirmados');
+  ok(Math.abs(t.kcal - 637.9) < 1e-9 && Math.abs(t.prot - 71.87) < 1e-9, 'totales sin redondear y solo confirmados');
   ok(weekStart('2026-11-15') === '2026-11-09' && weekStart('2026-11-09') === '2026-11-09', 'semana empieza lunes');
   const w = [{ date: '2026-11-03', kg: 84 }, { date: '2026-11-05', kg: 83.6 }, { date: '2026-11-10', kg: 83.2 }, { date: '2026-11-12', kg: 83 }];
   const s = weekStats(w, '2026-11-12');
   ok(Math.abs(s.cur - 83.1) < 1e-9 && Math.abs(s.prev - 83.8) < 1e-9 && s.curN === 2, 'promedio semanal');
   ok(Math.abs(rolling(w)[2].kg - 83.4) < 1e-9, 'promedio móvil de 7 días');
-  return 'OK: 7 pruebas';
+  return 'OK: 4 pruebas';
 }
 
 // ---------- inicio ----------
